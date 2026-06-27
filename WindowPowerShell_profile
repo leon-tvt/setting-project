@@ -1,0 +1,130 @@
+
+# ==============================
+# UNIFIED DEV SHELL (UDS) CORE
+# ==============================
+
+function Get-ProjectRoot {
+    $dir = Get-Location
+
+    while ($dir -ne $null) {
+        if (Test-Path "$dir\pom.xml") {
+            return $dir
+        }
+        $dir = Split-Path $dir -Parent
+    }
+
+    return Get-Location
+}
+
+function Get-JavaVersionFromPom($root) {
+    $pom = "$root\pom.xml"
+    if (!(Test-Path $pom)) { return $null }
+
+    $xml = [xml](Get-Content $pom)
+    $props = $xml.project.properties
+
+    if ($props."java.version") { return $props."java.version" }
+    if ($props."maven.compiler.source") { return $props."maven.compiler.source" }
+
+    return $null
+}
+
+function Resolve-JavaHome($version) {
+
+    if ($version) {
+        $jdk = Get-ChildItem "C:\Program Files\Java" -Directory |
+            Where-Object { $_.Name -like "*jdk-$version*" } |
+            Sort-Object Name -Descending |
+            Select-Object -First 1
+
+        if ($jdk) { return $jdk.FullName }
+    }
+
+    # fallback latest JDK
+    $jdk = Get-ChildItem "C:\Program Files\Java" -Directory |
+        Where-Object { $_.Name -like "jdk*" } |
+        Sort-Object Name -Descending |
+        Select-Object -First 1
+
+    return $jdk.FullName
+}
+
+function Init-UDS {
+
+    $root = Get-ProjectRoot
+    Set-Location $root
+
+    $javaVersion = Get-JavaVersionFromPom $root
+    $javaHome = Resolve-JavaHome $javaVersion
+
+    if ($javaHome) {
+        $env:JAVA_HOME = $javaHome
+        $env:Path = "$javaHome\bin;$env:Path"
+    }
+
+    Write-Host "UDS ACTIVE" -ForegroundColor Green
+    Write-Host "Project   : $root"
+    Write-Host "JAVA_HOME : $javaHome"
+}
+
+# ==============================
+# MAVEN WRAPPER (SMART mvn)
+# ==============================
+
+function mvnw {
+    & .\mvnw.cmd $args
+}
+
+function mvn {
+    if (Test-Path .\mvnw.cmd) {
+        & .\mvnw.cmd $args
+	return
+    } else {
+        $mvnCmd = Get-Command mvn.cmd -ErrorAction SilentlyContinue
+        if ($mvnCmd) {
+           & mvn.cmd $args
+           return
+        }
+    }
+
+    # CASE 3: no Maven anywhere → error
+    Write-Host "ERROR: Maven is not configured!" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Fix options:" -ForegroundColor Yellow
+    Write-Host "1. Add mvnw to project (recommended)"
+    Write-Host "   mvn -N wrapper:wrapper"
+    Write-Host ""
+    Write-Host "2. Install Maven globally"
+    Write-Host "   https://maven.apache.org/install.html"
+    Write-Host ""
+    Write-Host "3. Use IntelliJ Maven runner"
+    return
+}
+
+
+
+
+# ==============================
+# GRADLE WRAPPER (SMART gradle)
+# ==============================
+function gradle {
+    param(
+        [Parameter(ValueFromRemainingArguments=$true)]
+        $args
+    )
+
+    if (Test-Path ".\gradlew.bat") {
+        & .\gradlew.bat $args
+        return
+    }
+
+    if (Get-Command gradle.cmd -ErrorAction SilentlyContinue) {
+        & gradle.cmd $args
+        return
+    }
+
+    Write-Host "ERROR: Gradle not found" -ForegroundColor Red
+}
+
+# AUTO BOOT WHEN TERMINAL STARTS
+Init-UDS
